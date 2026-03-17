@@ -121,11 +121,11 @@ int main() {
         {
             if(small_image.at<uchar>(i,j)<YUZHI)
             {
-                small_image.at<uchar>(i,j)=255;
+                small_image.at<uchar>(i,j)=0;
             }
             else
             {
-                small_image.at<uchar>(i,j)=0;
+                small_image.at<uchar>(i,j)=255;
             }
         }
    
@@ -144,14 +144,14 @@ int main() {
 //先找最底下一行中心线
     for(int i=39;i>=1;i--) //从中间向左找上升沿
     {
-        if(small_image.at<uchar>(AY,i-1)-small_image.at<uchar>(AY,i) == 255) //找到上升沿
+        if(small_image.at<uchar>(AY,i-1)-small_image.at<uchar>(AY,i) == -255) //找到上升沿
         {
             AX = i; //A横坐标
         }
     }
     for(int i=39;i<79;i++) //从中间向右找上升沿
     {
-        if(small_image.at<uchar>(BY,i+1)-small_image.at<uchar>(BY,i) == 255) //找到上升沿
+        if(small_image.at<uchar>(BY,i+1)-small_image.at<uchar>(BY,i) == -255) //找到上升沿
         {
             BX = i; //B横坐标
         }
@@ -262,7 +262,7 @@ int main() {
         Yha=59;
         Xha+=balinyuL[i][0];
         Yha+=balinyuL[i][1];
-        if(small_image.at<uchar>(Yha,Xha) == 255)
+        if(small_image.at<uchar>(Yha,Xha) == 0)
         {
             small_image.at<uchar>(Yha,Xha) = 100;
             ZUO[Yha]=Xha;
@@ -271,7 +271,7 @@ int main() {
         
         
     }    
-    for(int j;Yha>20 && Xha>1 && j<60;j++)
+    for(int j=0;Yha>20 && Xha>1 && j<60;j++)
     {   
         int Xha_cp=Xha;
         int Yha_cp=Yha;
@@ -281,7 +281,7 @@ int main() {
             Yha=Yha_cp;
             Xha+=balinyuL[i][0];
             Yha+=balinyuL[i][1];
-            if(small_image.at<uchar>(Yha,Xha) == 255)
+            if(small_image.at<uchar>(Yha,Xha) == 0)
             {
                 small_image.at<uchar>(Yha,Xha) = 100;
                 ZUO[Yha]=Xha;
@@ -298,7 +298,7 @@ int main() {
         Yhb=59;
         Xhb+=balinyuR[i][0];
         Yhb+=balinyuR[i][1];
-        if(small_image.at<uchar>(Yhb,Xhb) == 255)
+        if(small_image.at<uchar>(Yhb,Xhb) == 0)
         {
             small_image.at<uchar>(Yhb,Xhb) = 100;
             YOU[Yhb]=Xhb;
@@ -307,7 +307,7 @@ int main() {
         
         
     }    
-    for(int j;Yhb>20 && Xhb<79 && j<60;j++)
+    for(int j=0;Yhb>20 && Xhb<79 && j<60;j++)
     {   
         int Xhb_cp=Xhb;
         int Yhb_cp=Yhb;
@@ -317,7 +317,7 @@ int main() {
             Yhb=Yhb_cp;
             Xhb+=balinyuR[i][0];
             Yhb+=balinyuR[i][1];
-            if(small_image.at<uchar>(Yhb,Xhb) == 255)
+            if(small_image.at<uchar>(Yhb,Xhb) == 0)
             {
                 small_image.at<uchar>(Yhb,Xhb) = 100;
                 YOU[Yhb]=Xhb;
