@@ -363,7 +363,10 @@ using namespace cv;
 // 固定图像尺寸 60行 × 80列
 #define IMAGE_H 60
 #define IMAGE_W 80
-
+#define threshold_max  (255*5)  // 补断线阈值
+#define threshold_min  (255*2)  // 去噪点阈值
+#define border_min  5    // 左边不要太靠边
+#define border_max  75   // 右边不要太靠边
 
 
 // 显示 60x80 二维数组图像（调试专用）
@@ -403,141 +406,210 @@ void color_to_gray_array(cv::Mat &color, uchar gray_arr[60][80])
 
 
 
-
-
-
-int main()
+//功能：由输入的灰度图数组得到更新的二值化阈值
+unsigned char otsu_binary0(uchar (*gray_array)[IMAGE_W])
 {
-    // ========================
-    // 1. 大津法阈值（完全不变）
-    // ========================
     unsigned int huidu[256] = {0};
     unsigned char YUZHI = 0;
-    cv::Mat color = cv::imread("saidao.jpg");
-    uchar small_image[60][80] = {0};
-    color_to_gray_array(color, small_image);
 
-
-
-
-    // 直方图统计
-    for (int i = 0; i < IMAGE_H; i++)
-    {
-        for (int j = 0; j < IMAGE_W; j++)
-        {
-            huidu[small_image[i][j]]++;
+    // ==================== 统计直方图（指针加速） ====================
+    for (int i = 0; i < IMAGE_H; i++) {
+        uchar* row = gray_array[i];  // 取行指针（加速）
+        for (int j = 0; j < IMAGE_W; j++) {
+            huidu[row[j]]++;
         }
     }
 
-    // 找第一高峰
+    // ==================== 找第一高峰 ====================
     unsigned int H1 = 0;
     unsigned char D1 = 0;
-    #define KUAN 30
+#define KUAN 30
 
-    for (int i = 0; i < 256; i++)
-    {
-        if (huidu[i] > H1)
-        {
+    for (int i = 0; i < 256; i++) {
+        if (huidu[i] > H1) {
             H1 = huidu[i];
             D1 = i;
         }
     }
 
-    // 找第二高峰
+    // ==================== 找第二高峰 ====================
     unsigned int H2 = 0;
     unsigned char D2 = 0;
     bool OK = false;
 
-    for (int i = H1 - 5; i > 0; i -= 5)
-    {
-        for (int j = 0; j < 256; j++)
-        {
-            if (huidu[j] > i && abs(j - D1) > KUAN)
-            {
+    for (int i = H1 - 5; i > 0 && !OK; i -= 5) {
+        for (int j = 0; j < 256; j++) {
+            if (huidu[j] > i && abs(j - D1) > KUAN) {
                 H2 = i;
                 D2 = j;
                 OK = true;
                 break;
             }
         }
-        if (OK) break;
     }
 
-    // 找山谷（阈值）
-    unsigned int H3 = 4800;
-    unsigned char D3 = 0;
+    // ==================== 找山谷（阈值） ====================
+    if (OK) {
+        unsigned int H3 = 4800;
+        unsigned char D3 = 0;
 
-    if (OK)
-    {
-        if (D1 < D2)
-        {
-            for (int i = D1; i < D2; i++)
-            {
-                if (huidu[i] < H3)
-                {
+        if (D1 < D2) {
+            for (int i = D1; i < D2; i++) {
+                if (huidu[i] < H3) {
                     H3 = huidu[i];
                     D3 = i;
                 }
             }
-        }
-        else
-        {
-            for (int i = D2; i < D1; i++)
-            {
-                if (huidu[i] < H3)
-                {
+        } else {
+            for (int i = D2; i < D1; i++) {
+                if (huidu[i] < H3) {
                     H3 = huidu[i];
                     D3 = i;
                 }
             }
         }
         YUZHI = D3;
+    } else {
+        YUZHI = 100; // 没找到就给默认值
     }
+    return YUZHI;
 
-    // ========================
-    // 2. 二值化（替换 Mat）
-    // ========================
-    for (int i = 0; i < IMAGE_H; i++)
+    
+}
+
+
+
+//根据更新的阈值进行二值化
+void otsu_binary(uchar (*gray_array)[IMAGE_W],uchar YUZHI)
+{
+    for (int i = 0; i < IMAGE_H; i++) {
+        uchar* row = gray_array[i];  // 行指针
+        for (int j = 0; j < IMAGE_W; j++) {
+            row[j] = (row[j] < YUZHI) ? 0 : 255;
+        }
+    }
+}
+
+
+
+//功能：将输入的二值数组进行补线和滤波
+void image_filter(uint8_t (*bin_image)[IMAGE_W])
+{
+    uint16_t i, j;
+    uint32_t sum;
+
+    // 只遍历内部像素（避免越界）
+    for (i = 1; i < IMAGE_H - 1; i++)
     {
-        for (int j = 0; j < IMAGE_W; j++)
+        // 取当前行 上一行 下一行 指针（加速核心！）
+        uint8_t *prev = bin_image[i-1];
+        uint8_t *curr = bin_image[i];
+        uint8_t *next = bin_image[i+1];
+
+        for (j = 1; j < IMAGE_W - 1; j++)
         {
-            if (small_image[i][j] < YUZHI)
-            {
-                small_image[i][j] = 0;
-            }
-            else
-            {
-                small_image[i][j] = 255;
-            }
+            // 纯指针访问 8 邻域，速度比数组下标快非常多
+            sum = prev[j-1] + prev[j] + prev[j+1]
+                + curr[j-1] +          curr[j+1]
+                + next[j-1] + next[j] + next[j+1];
+
+            // 补断线：周围很白，自己是黑 → 变白
+            if (sum >= threshold_max && curr[j] == 0)
+                curr[j] = 255;
+
+            // 去噪点：周围很黑，自己是白 → 变黑
+            if (sum <= threshold_min && curr[j] == 255)
+                curr[j] = 0;
+        }
+    }
+}
+
+
+
+//功能：加入边框，防止八邻域出界
+void image_draw_rectan(uint8_t (*image)[IMAGE_W])
+{
+    uint8_t i;
+    for(i=0;i<IMAGE_H;i++)
+    {
+        image[i][0] = 0;
+        image[i][1] = 0;
+        image[i][IMAGE_W-1] =0;
+        image[i][IMAGE_W-2] =0;
+    }
+    for(i=0;i<IMAGE_W;i++)
+    {
+        image[0][i] =0;
+        image[1][i] =0;
+    }
+}
+
+
+//功能：找起点,AB点（白到黑的跳变点）在白色像素
+unsigned char start_point_l[2] = {0};
+unsigned char start_point_r[2] = {0};
+unsigned char get_start_point(unsigned char start_row , uint8_t (*bin_image)[IMAGE_W])
+{
+    unsigned char i = 0, l_found = 0, r_found = 0;
+
+    start_point_l[0] = 0;
+    start_point_l[1] = 0;
+    start_point_r[0] = 0;
+    start_point_r[1] = 0;
+
+    // 找左边界：白→黑跳变
+    for (i = IMAGE_W/2; i > border_min; i--)
+    {
+        start_point_l[0] = i;
+        start_point_l[1] = start_row;
+        if (bin_image[start_row][i] == 255 && bin_image[start_row][i-1] == 0)
+        {
+            l_found = 1;
+            break;
         }
     }
 
-    // ========================
-    // 3. 找底部边缘 AB 点
-    // ========================
-    unsigned char AX, AY;
-    unsigned char BX, BY;
-
-    AY = 59;
-    BY = 59;
-
-    // 左找 A
-    for (int i = 39; i >= 1; i--)
+    // 找右边界：白→黑跳变
+    for (i = IMAGE_W/2; i < border_max; i++)
     {
-        if (small_image[AY][i-1] - small_image[AY][i] == -255)
+        start_point_r[0] = i;
+        start_point_r[1] = start_row;
+        if (bin_image[start_row][i] == 255 && bin_image[start_row][i+1] == 0)
         {
-            AX = i;
+            r_found = 1;
+            break;
         }
     }
 
-    // 右找 B
-    for (int i = 39; i < 79; i++)
+    if(l_found && r_found)
+        return 1;
+    else
+        return 0;
+}
+
+
+int main()
+{
+    cv::Mat color = cv::imread("saidao1.jpg");
+    uchar small_image[60][80] = {0};
+    uchar YUZHI=otsu_binary0(small_image);
+
+    color_to_gray_array(color, small_image);
+
+    otsu_binary(small_image,YUZHI);
+
+    image_filter(small_image);
+
+    image_draw_rectan(small_image);
+
+    unsigned char AX=0;
+    unsigned char BX=0;
+    if(get_start_point(59,small_image)==1)
     {
-        if (small_image[BY][i+1] - small_image[BY][i] == -255)
-        {
-            BX = i;
-        }
+        AX=start_point_l[0];
+        BX=start_point_r[0];
     }
+
 
     // ========================
     // 4. 八邻域巡线（纯数组版）
@@ -556,12 +628,12 @@ int main()
                           {1,0},{1,1},{0,1},{-1,1}};
 
     // ========== 左线跟踪 ==========
-    int Xha = AX - 1;
+    int Xha = AX ;
     int Yha = 59;
 
     for (int i = 0; i < 5; i++)
     {
-        Xha = AX - 1;
+        Xha = AX ;
         Yha = 59;
         Xha += balinyuL[i][0];
         Yha += balinyuL[i][1];
@@ -596,12 +668,12 @@ int main()
     }
 
     // ========== 右线跟踪 ==========
-    int Xhb = BX + 1;
+    int Xhb = BX ;
     int Yhb = 59;
 
     for (int i = 0; i < 5; i++)
     {
-        Xhb = BX + 1;
+        Xhb = BX ;
         Yhb = 59;
         Xhb += balinyuR[i][0];
         Yhb += balinyuR[i][1];
