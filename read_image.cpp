@@ -545,7 +545,8 @@ void image_draw_rectan(uint8_t (*image)[IMAGE_W])
 }
 
 
-//功能：找起点,AB点（白到黑的跳变点）在白色像素
+
+//功能：找起点,AB点（白到黑的跳变点）找到的点在白色像素
 unsigned char start_point_l[2] = {0};
 unsigned char start_point_r[2] = {0};
 unsigned char get_start_point(unsigned char start_row , uint8_t (*bin_image)[IMAGE_W])
@@ -588,29 +589,304 @@ unsigned char get_start_point(unsigned char start_row , uint8_t (*bin_image)[IMA
 }
 
 
-int main()
+
+#if 1
+// 最大搜索点数（防止数组越界，取高度*3足够安全）
+#define USE_num    IMAGE_H*3
+
+// 左边界点数组：points_l[编号][0]=x, [1]=y
+uint16_t points_l[USE_num][2] = {0};
+// 右边界点数组：points_r[编号][0]=x, [1]=y
+uint16_t points_r[USE_num][2] = {0};
+
+// 左/右边界每一步的生长方向（0~7，对应8个邻域方向）
+uint16_t dir_r[USE_num] = {0};
+uint16_t dir_l[USE_num] = {0};
+
+// 实际搜到的左/右边界点数量
+uint16_t data_stastics_l = 0;
+uint16_t data_stastics_r = 0;
+
+// 左右边界相遇的最高行（巡线终止位置）
+uint8_t hightest = 0;
+
+// 绝对值函数（防止调用库函数）
+#define my_abs(a) ((a)>(0)?(a):(-a))
+
+// =====================================================================================
+// 函数功能：八邻域搜索左右跑道边界
+// 入口：
+//   break_flag    最大搜索次数（防止死循环）
+//   image         二值图像数组（0黑=线，255白=背景）
+//   l_stastic     左边界点数量（指针，输出）
+//   r_stastic     右边界点数量（指针，输出）
+//   l_start_x/y   左边界起始点（底部）
+//   r_start_x/y   右边界起始点（底部）
+//   hightest      左右边界相遇的最高行（输出）
+// =====================================================================================
+void search_l_r(uint16_t break_flag, uint8_t(*image)[IMAGE_W],
+                uint16_t *l_stastic, uint16_t *r_stastic,
+                uint8_t l_start_x, uint8_t l_start_y,
+                uint8_t r_start_x, uint8_t r_start_y,
+                uint8_t* hightest)
 {
-    cv::Mat color = cv::imread("saidao1.jpg");
-    uchar small_image[60][80] = {0};
-    uchar YUZHI=otsu_binary0(small_image);
+    uint8_t i = 0, j = 0;
 
-    color_to_gray_array(color, small_image);
+    // ==================== 左边界8邻域初始化 ====================
+    // 8个邻域坐标缓存
+    uint8_t search_filds_l[8][2] = {0};
+    // 左边界候选点数量
+    uint8_t index_l = 0;
+    // 左边界候选点缓存
+    uint8_t temp_l[8][2] = {0};
+    // 左边界当前中心点
+    uint8_t center_point_l[2] = {0};
+    // 左边界点计数
+    uint16_t l_data_statics;
 
-    otsu_binary(small_image,YUZHI);
+    // 左边界8邻域搜索顺序（顺时针）
+    // 顺序：下 → 左下 → 左 → 左上 → 上 → 右上 → 右 → 右下
+    static int8_t seeds_l[8][2] = {
+        {0,1}, {-1,1}, {-1,0}, {-1,-1},
+        {0,-1},{1,-1},{1,0},{1,1}
+    };
 
-    image_filter(small_image);
+    // ==================== 右边界8邻域初始化 ====================
+    uint8_t search_filds_r[8][2] = {0};
+    uint8_t center_point_r[2] = {0};
+    uint8_t index_r = 0;
+    uint8_t temp_r[8][2] = {0};
+    uint16_t r_data_statics;
 
-    image_draw_rectan(small_image);
+    // 右边界8邻域搜索顺序（逆时针，保证对称搜索）
+    static int8_t seeds_r[8][2] = {
+        {0,1},{1,1},{1,0},{1,-1},
+        {0,-1},{-1,-1},{-1,0},{-1,1}
+    };
 
-    unsigned char AX=0;
-    unsigned char BX=0;
-    if(get_start_point(59,small_image)==1)
+    // 将外部计数读入本地变量
+    l_data_statics = *l_stastic;
+    r_data_statics = *r_stastic;
+
+    // 设置左右边界的起始点（从底部开始）
+    center_point_l[0] = l_start_x;
+    center_point_l[1] = l_start_y;
+    center_point_r[0] = r_start_x;
+    center_point_r[1] = r_start_y;
+
+    // ==================== 开始循环向上搜索 ====================
+    while (break_flag--)
     {
-        AX=start_point_l[0];
-        BX=start_point_r[0];
+        // ========== 1. 计算左点8个邻域的坐标 ==========
+        for (i=0; i<8; i++)
+        {
+            search_filds_l[i][0] = center_point_l[0] + seeds_l[i][0];
+            search_filds_l[i][1] = center_point_l[1] + seeds_l[i][1];
+        }
+        // 保存当前左中心点到边界数组
+        points_l[l_data_statics][0] = center_point_l[0];
+        points_l[l_data_statics][1] = center_point_l[1];
+        l_data_statics++;
+
+        // ========== 2. 计算右点8个邻域的坐标 ==========
+        for (i=0; i<8; i++)
+        {
+            search_filds_r[i][0] = center_point_r[0] + seeds_r[i][0];
+            search_filds_r[i][1] = center_point_r[1] + seeds_r[i][1];
+        }
+        // 保存当前右中心点到边界数组
+        points_r[r_data_statics][0] = center_point_r[0];
+        points_r[r_data_statics][1] = center_point_r[1];
+        //r_data_statics++;
+        // ========== 3. 左边界：寻找下一个边缘点 ==========
+        index_l = 0;
+        // 清空候选点
+        for(i=0;i<8;i++){ temp_l[i][0]=0; temp_l[i][1]=0; }
+
+        // 遍历8个方向，寻找【黑点→白点】跳变（跑道边缘）
+        for(i=0;i<8;i++)
+        {
+            // 当前点是黑线(0)，下一个点是背景(255) → 找到边缘
+            if( image[search_filds_l[i][1]][search_filds_l[i][0]] == 0
+             && image[search_filds_l[(i+1)&7][1]][search_filds_l[(i+1)&7][0]] == 255 )
+            {
+                // 保存这个边缘点
+                temp_l[index_l][0] = search_filds_l[i][0];
+                temp_l[index_l][1] = search_filds_l[i][1];
+                index_l++;
+                // 记录方向（用于十字、弯道判断）
+                dir_l[l_data_statics-1] = i;
+            }
+
+            // 如果找到候选点，选最靠上的那个作为下一个中心点
+            if(index_l)
+            {
+                center_point_l[0] = temp_l[0][0];
+                center_point_l[1] = temp_l[0][1];
+                // 遍历所有候选，取y最小（最上面）的点
+                for(j=0;j<index_l;j++)
+                {
+                    if(center_point_l[1] > temp_l[j][1])
+                    {
+                        center_point_l[0] = temp_l[j][0];
+                        center_point_l[1] = temp_l[j][1];
+                    }
+                }
+            }
+        }
+
+        // ========== 4. 防死循环 & 边界相遇 & 同步保护 ==========
+        // 连续3个点不动 → 卡死，退出
+        if( (points_r[r_data_statics][0]==points_r[r_data_statics-1][0] && points_r[r_data_statics][0]==points_r[r_data_statics-2][0]
+          && points_r[r_data_statics][1]==points_r[r_data_statics-1][1] && points_r[r_data_statics][1]==points_r[r_data_statics-2][1])
+          ||(points_l[l_data_statics-1][0]==points_l[l_data_statics-2][0] && points_l[l_data_statics-1][0]==points_l[l_data_statics-3][0]
+          && points_l[l_data_statics-1][1]==points_l[l_data_statics-2][1] && points_l[l_data_statics-1][1]==points_l[l_data_statics-3][1]))
+        {
+            break;
+        }
+
+        // 左右点几乎重合 → 边界相遇，巡线结束
+        if( my_abs(points_r[r_data_statics][0] - points_l[l_data_statics-1][0]) < 2
+         && my_abs(points_r[r_data_statics][1] - points_l[l_data_statics-1][1]) < 2 )
+        {
+            // 记录相遇的最高行
+            *hightest = (points_r[r_data_statics][1] + points_l[l_data_statics-1][1])/2;
+            break;
+        }
+
+        // 右边比左边高 → 左边等待右边，不更新,需要同步更新
+        if( points_r[r_data_statics][1] < points_l[l_data_statics-1][1] )
+        {
+            continue;
+        }
+
+        // 特殊方向修正，防止跑偏，7表示方向为右下
+        if( dir_l[l_data_statics-1] ==7 && (points_r[r_data_statics][1] > points_l[l_data_statics-1][1]) )
+        {
+            center_point_l[0] = points_l[l_data_statics-1][0];
+            center_point_l[1] = points_l[l_data_statics-1][1];
+            l_data_statics--;
+        }
+
+        // 右点计数+1
+        r_data_statics++;
+
+        // ========== 5. 右边界：寻找下一个边缘点 ==========
+        index_r = 0;
+        for(i=0;i<8;i++){ temp_r[i][0]=0; temp_r[i][1]=0; }
+
+        // 同左边界逻辑：找 黑→白 跳变
+        for(i=0;i<8;i++)
+        {
+            if( image[search_filds_r[i][1]][search_filds_r[i][0]] ==0
+             && image[search_filds_r[(i+1)&7][1]][search_filds_r[(i+1)&7][0]] ==255 )
+            {
+                temp_r[index_r][0] = search_filds_r[i][0];
+                temp_r[index_r][1] = search_filds_r[i][1];
+                index_r++;
+                dir_r[r_data_statics-1] = i;
+            }
+
+            if(index_r)
+            {
+                center_point_r[0] = temp_r[0][0];
+                center_point_r[1] = temp_r[0][1];
+                // 选最靠上的点
+                for(j=0;j<index_r;j++)
+                {
+                    if(center_point_r[1] > temp_r[j][1])
+                    {
+                        center_point_r[0] = temp_r[j][0];
+                        center_point_r[1] = temp_r[j][1];
+                    }
+                }
+            }
+        }
     }
 
+    // 把最终计数写回外部变量
+    *l_stastic = l_data_statics;
+    *r_stastic = r_data_statics;
+}
 
+
+
+
+// 提取每行左线
+//-----------------------------------------------------------------------------------
+uint8_t l_border[IMAGE_H];
+uint8_t r_border[IMAGE_H];
+uint8_t center_line[IMAGE_H];
+
+void get_left(uint16_t total_L)//原理同下，看下面的函数
+{
+    uint8_t i;
+    uint16_t j;
+    uint8_t h;
+
+    for(i=0;i<IMAGE_H;i++) l_border[i] = border_min;
+    h = IMAGE_H - 2;
+
+    for(j=0;j<total_L;j++)
+    {
+        if(points_l[j][1] == h)
+        {
+            l_border[h] = points_l[j][0]+1;
+        }
+        else
+            continue;
+        h--;
+        if(h == 0) break;
+    }
+}
+
+//-----------------------------------------------------------------------------------
+// 提取每行右线
+//-----------------------------------------------------------------------------------
+void get_right(uint16_t total_R)
+{
+    uint8_t i;
+    uint16_t j;
+    uint8_t h;
+
+    for(i=0;i<IMAGE_H;i++) r_border[i] = border_max;//默认右线
+    h = IMAGE_H -2;//从倒数第三行开始
+
+    for(j=0;j<total_R;j++)//每行只保留一个边界点
+    {
+        if(points_r[j][1] == h)
+        {
+            r_border[h] = points_r[j][0]-1;
+        }
+        else
+            continue;
+        h--;
+        if(h ==0) break;//完成标志
+    }
+}
+
+
+
+
+#endif
+int main()
+{
+    cv::Mat color = cv::imread("saidao3.jpg");//读取图片（jpg）
+
+    uchar small_image[60][80] = {0};//数组图像初始化
+
+    color_to_gray_array(color, small_image);//将mat转化为二维数组
+
+    uchar YUZHI=otsu_binary0(small_image);//更新阈值
+
+    otsu_binary(small_image,YUZHI);//根据阈值二值化
+
+    image_filter(small_image);//补断线，去噪声
+
+    image_draw_rectan(small_image);//画黑框（算法需要
+
+
+    #if 0
     // ========================
     // 4. 八邻域巡线（纯数组版）
     // ========================
@@ -713,6 +989,36 @@ int main()
         ZHONGJIAN[i] = (ZUO[i] + YOU[i]) / 2;
         small_image[i][ZHONGJIAN[i]] = 100;
     }
+    #endif
+
+    uint16_t i;
+    uint8_t hightest = 0;//重要参数，是左右线相遇时的最高点
+
+
+    data_stastics_l =0;
+    data_stastics_r =0;
+
+    if(get_start_point((IMAGE_H-2),small_image)) // 5.找起点,只有找到时才运行下面程序
+    {
+        search_l_r(USE_num, small_image, &data_stastics_l, &data_stastics_r,
+                   start_point_l[0], start_point_l[1],
+                   start_point_r[0], start_point_r[1], &hightest);  //提取左右线
+
+        get_left(data_stastics_l);    // 6.提取左线
+        get_right(data_stastics_r);   // 7.提取右线
+    }
+
+
+    // 计算并画中线左线右线,调试用
+    for(i=hightest; i<IMAGE_H-1; i++)
+    {
+        center_line[i] = (l_border[i] + r_border[i])/2;
+        small_image[i][l_border[i]]=180;
+        small_image[i][r_border[i]]=80;
+        small_image[i][center_line[i]]=0;
+    }
+
+
 
     // 创建名为"RGB"的窗口并显示图像
     show_array_image(small_image);
@@ -722,10 +1028,6 @@ int main()
     
     // 销毁所有创建的窗口，释放资源
     destroyAllWindows();
-
-    return 0; // 正常退出程序
-
-
 
     return 0;
 }
