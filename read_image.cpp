@@ -367,6 +367,8 @@ using namespace cv;
 #define threshold_min  (255*2)  // 去噪点阈值
 #define border_min  5    // 左边不要太靠边
 #define border_max  75   // 右边不要太靠边
+uchar flag_yuanhuan;
+uchar flag_shizi;
 
 
 // 显示 60x80 二维数组图像（调试专用）
@@ -385,7 +387,7 @@ void show_array_image(uchar img[60][80])
     cv::waitKey(1);  // 刷新窗口
 }
 
-
+ 
 
 // 功能：把彩色cv::Mat 转成 你的灰度二维数组 uchar gray_arr[60][80]（调试专用）
 void color_to_gray_array(cv::Mat &color, uchar gray_arr[60][80])
@@ -559,7 +561,7 @@ unsigned char get_start_point(unsigned char start_row , uint8_t (*bin_image)[IMA
     start_point_r[1] = 0;
 
     // 找左边界：白→黑跳变
-    for (i = IMAGE_W/2; i > border_min; i--)
+    for (i = IMAGE_W/2; i > 0; i--)//原来是i > border_min
     {
         start_point_l[0] = i;
         start_point_l[1] = start_row;
@@ -571,7 +573,7 @@ unsigned char get_start_point(unsigned char start_row , uint8_t (*bin_image)[IMA
     }
 
     // 找右边界：白→黑跳变
-    for (i = IMAGE_W/2; i < border_max; i++)
+    for (i = IMAGE_W/2; i < IMAGE_W; i++)//原来是i < border_max
     {
         start_point_r[0] = i;
         start_point_r[1] = start_row;
@@ -602,6 +604,9 @@ uint16_t points_r[USE_num][2] = {0};
 // 左/右边界每一步的生长方向（0~7，对应8个邻域方向）
 uint16_t dir_r[USE_num] = {0};
 uint16_t dir_l[USE_num] = {0};
+//345    543
+//2 6    6 2
+//107左  701右
 
 // 实际搜到的左/右边界点数量
 uint16_t data_stastics_l = 0;
@@ -697,7 +702,6 @@ void search_l_r(uint16_t break_flag, uint8_t(*image)[IMAGE_W],
         // 保存当前右中心点到边界数组
         points_r[r_data_statics][0] = center_point_r[0];
         points_r[r_data_statics][1] = center_point_r[1];
-        //r_data_statics++;
         // ========== 3. 左边界：寻找下一个边缘点 ==========
         index_l = 0;
         // 清空候选点
@@ -716,6 +720,7 @@ void search_l_r(uint16_t break_flag, uint8_t(*image)[IMAGE_W],
                 index_l++;
                 // 记录方向（用于十字、弯道判断）
                 dir_l[l_data_statics-1] = i;
+                cout<<(int)i;
             }
 
             // 如果找到候选点，选最靠上的那个作为下一个中心点
@@ -785,6 +790,7 @@ void search_l_r(uint16_t break_flag, uint8_t(*image)[IMAGE_W],
                 temp_r[index_r][1] = search_filds_r[i][1];
                 index_r++;
                 dir_r[r_data_statics-1] = i;
+                //cout<<(int)i;
             }
 
             if(index_r)
@@ -867,11 +873,101 @@ void get_right(uint16_t total_R)
 
 
 
+bool is_yuanhuan(uint8_t* hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_num],uint16_t data_stastics_l,uint16_t data_stastics_r
+ ,uchar small_image[60][80])
+{
+    for(int i=20;i<data_stastics_r;i++)
+    {
+        if((dir_r[i-1]==5 |  dir_r[i]==5 ) &dir_r[i+2]==4 & (dir_r[i+4]==3 | dir_r[i+5]==3))//有凹处
+        {
+            if((dir_r[i-20]==4 & dir_r[i-19]==4 &dir_r[i-18]==4)|(dir_r[i-26]==4 & dir_r[i-27]==4 &dir_r[i-28]==4))//下面是岔路
+            {
+                if(small_image[2][2]==255)//右上角点为白色（要进的岔路）
+                {
+                    return true;//找到了，改变特殊点的值
+                }
+            }
+        }
+        
+    }
+    return false;
+
+}
+
+
+uint16_t point_angle[2],point_fuzhu[2];
+void yuanhuan_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_num],uint16_t data_stastics_l,uint16_t data_stastics_r
+ ,uchar small_image[60][80],uint16_t (*points_r)[2],uint16_t (*points_l)[2])
+ {
+    if(flag_yuanhuan==1)//进入环岛标志位
+    {
+        if(hightest>10)
+        {
+            flag_yuanhuan++;
+        }
+    }
+    else if(flag_yuanhuan==2)//环岛绕圈标志位
+    {
+        if(hightest<10)
+        {
+            flag_yuanhuan++;
+        }
+    }
+    else if(flag_yuanhuan==3)//出环岛标志位
+    {
+        if(small_image[57][2]==255 & small_image[57][78]==255)//底下全是白色
+        {
+            flag_yuanhuan++;
+        }
+    }
+    else//回归赛道标志位
+    {
+        if(small_image[57][2]==0 | small_image[57][78]==0)
+            flag_yuanhuan=0;
+    }
+    switch (flag_yuanhuan)
+    {
+    case 1:
+        for(int i=0;i<data_stastics_r-2;i++)//优化方向：可以从大一点的数开始
+        {
+            if(dir_r[i]==7 & (dir_r[i+1]==5 | dir_r[i+2]==5))//找到拐点，参见图yuanhuan4
+            {
+                point_angle[0]=points_r[i][0];
+                point_angle[1]=points_r[i][1];
+                //补线
+                break;
+            }
+        }
+        break;
+    case 2:
+        break;
+    case 3:
+        for(int i=2;i<data_stastics_l;i++)//优化方向：可以从大一点的数开始
+        {
+            if(dir_r[i]==3 & (dir_r[i-1]==5 | dir_r[i-2]==5))//找到左凹点,参见图yuanhuan6
+            {
+                point_angle[0]=points_l[i][0];
+                point_angle[1]=points_l[i][1];
+                //补线
+                break;
+            }
+
+        }
+        break;
+    case 4:
+        break;
+        //下全空白补线
+    case 0:
+        break;    
+    
+    }
+
+ }
 
 #endif
 int main()
 {
-    cv::Mat color = cv::imread("saidao3.jpg");//读取图片（jpg）
+    cv::Mat color = cv::imread("saidao_pic/yuanhuan6.jpg");//读取图片（jpg）
 
     uchar small_image[60][80] = {0};//数组图像初始化
 
@@ -1006,6 +1102,12 @@ int main()
 
         get_left(data_stastics_l);    // 6.提取左线
         get_right(data_stastics_r);   // 7.提取右线
+        //元素处理
+        if(is_yuanhuan(&hightest,dir_r,dir_l,data_stastics_l,data_stastics_r,small_image))flag_yuanhuan=1;
+        if(flag_yuanhuan)
+        {
+            cout<<"a";
+        }
     }
 
 
