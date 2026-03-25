@@ -357,6 +357,7 @@ int main() {
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <stdint.h>
 using namespace std;
 using namespace cv;
 
@@ -367,8 +368,8 @@ using namespace cv;
 #define threshold_min  (255*2)  // 去噪点阈值
 #define border_min  5    // 左边不要太靠边
 #define border_max  75   // 右边不要太靠边
-uchar flag_yuanhuan;
-uchar flag_shizi;
+uchar flag_yuanhuan=4;
+uchar flag_shizi=0;
 
 
 // 显示 60x80 二维数组图像（调试专用）
@@ -543,6 +544,72 @@ void image_draw_rectan(uint8_t (*image)[IMAGE_W])
     {
         image[0][i] =0;
         image[1][i] =0;
+    }
+}
+
+
+
+/**
+ * @brief 计算两点直线，仅更新边界数组：border[y] = x
+ * @param start     起点数组 {x, y}
+ * @param end       终点数组 {x, y}
+ * @param border    边界数组首地址（y为索引，存储对应x）
+ */
+void line_to_border(
+                    const uint16_t start[2],
+                    const uint16_t end[2],
+                    uint8_t *border)
+{
+    int x1 = (int)start[0];
+    int y1 = (int)start[1];
+    int x2 = (int)end[0];
+    int y2 = (int)end[1];
+
+    int dx = x2 - x1;
+    int dy = y2 - y1;
+
+    int stepX = dx >= 0 ? 1 : -1;
+    int stepY = dy >= 0 ? 1 : -1;
+
+    dx = dx >= 0 ? dx : -dx;
+    dy = dy >= 0 ? dy : -dy;
+
+    int x = x1;
+    int y = y1;
+
+    if (dx > dy)
+    {
+        int err = 2 * dy - dx;
+        for (int i = 0; i <= dx; i++)
+        {
+            // 只更新边界：border[y] = x
+            *(border + y) = (uint8_t)x;
+
+            if (err >= 0)
+            {
+                y += stepY;
+                err -= 2 * dx;
+            }
+            x += stepX;
+            err += 2 * dy;
+        }
+    }
+    else
+    {
+        int err = 2 * dx - dy;
+        for (int i = 0; i <= dy; i++)
+        {
+            // 只更新边界
+            *(border + y) = (uint8_t)x;
+
+            if (err >= 0)
+            {
+                x += stepX;
+                err -= 2 * dy;
+            }
+            y += stepY;
+            err += 2 * dx;
+        }
     }
 }
 
@@ -895,10 +962,10 @@ bool is_yuanhuan(uint8_t* hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_nu
 }
 
 
-uint16_t point_angle[2],point_fuzhu[2];
 void yuanhuan_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_num],uint16_t data_stastics_l,uint16_t data_stastics_r
- ,uchar small_image[60][80],uint16_t (*points_r)[2],uint16_t (*points_l)[2])
+ ,uchar small_image[60][80],uint16_t (*points_r)[2],uint16_t (*points_l)[2],uint8_t (*l_border)[IMAGE_H],uint8_t (*r_border)[IMAGE_H])
  {
+    uint16_t point_angle[2],point_fuzhu[2];
     if(flag_yuanhuan==1)//进入环岛标志位
     {
         if(hightest>10)
@@ -922,7 +989,7 @@ void yuanhuan_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_n
     }
     else//回归赛道标志位
     {
-        if(small_image[57][2]==0 | small_image[57][78]==0)
+        if(small_image[50][2]==0 | small_image[57][77]==0)//注意原来不是50是57
             flag_yuanhuan=0;
     }
     switch (flag_yuanhuan)
@@ -934,7 +1001,9 @@ void yuanhuan_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_n
             {
                 point_angle[0]=points_r[i][0];
                 point_angle[1]=points_r[i][1];
-                //补线
+                point_fuzhu[0]=2;
+                point_fuzhu[1]=57;
+                line_to_border(point_fuzhu,point_angle,l_border[0]);
                 break;
             }
         }
@@ -944,10 +1013,14 @@ void yuanhuan_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_n
     case 3:
         for(int i=2;i<data_stastics_l;i++)//优化方向：可以从大一点的数开始
         {
-            if(dir_r[i]==3 & (dir_r[i-1]==5 | dir_r[i-2]==5))//找到左凹点,参见图yuanhuan6
+            if(dir_l[i]==3 & (dir_l[i-1]==5 | dir_l[i-2]==5))//找到左凹点,参见图yuanhuan6
             {
+                
                 point_angle[0]=points_l[i][0];
                 point_angle[1]=points_l[i][1];
+                point_fuzhu[0]=77;//写死了固定点，待优化
+                point_fuzhu[1]=20;
+                line_to_border(point_fuzhu,point_angle,l_border[0]);
                 //补线
                 break;
             }
@@ -955,6 +1028,12 @@ void yuanhuan_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_n
         }
         break;
     case 4:
+    cout<<"ru";
+                point_angle[0]=2;
+                point_angle[1]=58;
+                point_fuzhu[0]=77;//写死了固定点，待优化
+                point_fuzhu[1]=20;
+                line_to_border(point_fuzhu,point_angle,l_border[0]);
         break;
         //下全空白补线
     case 0:
@@ -967,7 +1046,7 @@ void yuanhuan_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_n
 #endif
 int main()
 {
-    cv::Mat color = cv::imread("saidao_pic/yuanhuan6.jpg");//读取图片（jpg）
+    cv::Mat color = cv::imread("saidao_pic/yuanhuan7.jpg");//读取图片（jpg）
 
     uchar small_image[60][80] = {0};//数组图像初始化
 
@@ -1106,7 +1185,7 @@ int main()
         if(is_yuanhuan(&hightest,dir_r,dir_l,data_stastics_l,data_stastics_r,small_image))flag_yuanhuan=1;
         if(flag_yuanhuan)
         {
-            cout<<"a";
+            yuanhuan_deal(hightest,dir_r,dir_l,data_stastics_l,data_stastics_r,small_image,points_r,points_l,&l_border,&r_border);
         }
     }
 
