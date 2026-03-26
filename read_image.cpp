@@ -368,8 +368,8 @@ using namespace cv;
 #define threshold_min  (255*2)  // 去噪点阈值
 #define border_min  5    // 左边不要太靠边
 #define border_max  75   // 右边不要太靠边
-uchar flag_yuanhuan=4;
-uchar flag_shizi=0;
+uchar flag_yuanhuan=0;
+uchar flag_shizi=4;
 
 
 // 显示 60x80 二维数组图像（调试专用）
@@ -787,7 +787,7 @@ void search_l_r(uint16_t break_flag, uint8_t(*image)[IMAGE_W],
                 index_l++;
                 // 记录方向（用于十字、弯道判断）
                 dir_l[l_data_statics-1] = i;
-                cout<<(int)i;
+                //cout<<(int)i;
             }
 
             // 如果找到候选点，选最靠上的那个作为下一个中心点
@@ -857,7 +857,7 @@ void search_l_r(uint16_t break_flag, uint8_t(*image)[IMAGE_W],
                 temp_r[index_r][1] = search_filds_r[i][1];
                 index_r++;
                 dir_r[r_data_statics-1] = i;
-                //cout<<(int)i;
+                cout<<(int)i;
             }
 
             if(index_r)
@@ -943,7 +943,7 @@ void get_right(uint16_t total_R)
 bool is_yuanhuan(uint8_t* hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_num],uint16_t data_stastics_l,uint16_t data_stastics_r
  ,uchar small_image[60][80])
 {
-    for(int i=20;i<data_stastics_r;i++)
+    for(int i=20;i<data_stastics_r-5;i++)
     {
         if((dir_r[i-1]==5 |  dir_r[i]==5 ) &dir_r[i+2]==4 & (dir_r[i+4]==3 | dir_r[i+5]==3))//有凹处
         {
@@ -1028,7 +1028,6 @@ void yuanhuan_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_n
         }
         break;
     case 4:
-    cout<<"ru";
                 point_angle[0]=2;
                 point_angle[1]=58;
                 point_fuzhu[0]=77;//写死了固定点，待优化
@@ -1043,10 +1042,226 @@ void yuanhuan_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_n
 
  }
 
+
+
+
+
+
+ bool is_shizi(uint8_t* hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_num],uint16_t data_stastics_l,uint16_t data_stastics_r
+ ,uchar small_image[60][80])
+{
+    uint8_t zhijiaoy1=0,zhijiaoy2=0;
+    for(int i=20;i<data_stastics_l;i++)
+    {
+        if(dir_l[i-1]==4 &  dir_l[i]==4  &dir_l[i-3]==2 & dir_l[i-4]==2 & small_image[57][2]==0)//左有直角弯，且左下角为黑色
+        {
+            zhijiaoy1=points_l[i][1];
+        }
+        
+    }
+    if(zhijiaoy1)
+    {
+        for(int i=zhijiaoy1-15;i<zhijiaoy1+15;i++)//阈值（因为十字前，两个直角几乎是同y
+        {
+            if(dir_r[i-1]==4 &  dir_r[i]==4  &dir_r[i-3]==2 & dir_r[i-4]==2 & small_image[57][77]==0)//左有直角弯，且左下角为黑色
+            {
+                zhijiaoy2=points_l[i][1];
+                return true;
+            }
+        
+        }
+    }
+    return false;//不是十字
+    
+}
+
+
+
+
+void shizi_deal(uint8_t hightest,uint16_t dir_r[USE_num],uint16_t dir_l[USE_num],uint16_t data_stastics_l,uint16_t data_stastics_r
+ ,uchar small_image[60][80],uint16_t (*points_r)[2],uint16_t (*points_l)[2],uint8_t (*l_border)[IMAGE_H],uint8_t (*r_border)[IMAGE_H])
+ {
+    uint16_t point_angle[2],point_fuzhu[2];
+    if(flag_shizi==1)//进入十字标志位
+    {
+        if(small_image[57][2]==255 & small_image[57][77]==255)
+        {
+            flag_shizi++;
+        }
+    }
+    else if(flag_shizi==2)//处于十字中（底角为白色）
+    {
+        if(small_image[57][2]==0 | small_image[57][77]==0)
+        {
+            flag_shizi++;
+        }
+    }
+    else if(flag_shizi==3)//拐弯中
+    {
+        if(hightest<10)//不是拐弯了（相遇点在上）
+        {
+            flag_shizi++;
+        }
+    }
+    else if(flag_shizi==4)//一角补线
+    {
+        if(small_image[40][2]==255 & small_image[40][77]==255)//底下全是白，太晚了可能
+        {
+            flag_shizi++;
+        }
+    }
+    else//flag=5，两角补线
+    {
+        if(small_image[50][2]==0 | small_image[50][77]==0)//底下有一个是黑
+        {
+            flag_shizi=0;//出十字了
+        }
+    }
+    switch (flag_shizi)
+    {
+    case 1:
+    for(int i=5;i<data_stastics_l;i++)
+    {
+        if(dir_l[i-1]==2  &(dir_l[i-3]==3 | dir_l[i-2]==3))//左有直角弯，且左下角为黑色
+        {
+            point_angle[0]=points_l[i][0];
+            point_angle[1]=points_l[i][1];
+            point_fuzhu[0]=points_l[data_stastics_l-10][0];
+            point_fuzhu[1]=points_l[data_stastics_l-10][1];
+            break;
+        }
+        
+    }
+    if(point_angle[0])
+    {
+        for(int i=0;i<point_angle[1]+15;i++)//阈值（因为十字前，两个直角几乎是同y
+        {
+            if(dir_r[i-1]==2  &(dir_r[i-3]==3 | dir_r[i-2]==3))
+            {
+                line_to_border(point_fuzhu,point_angle,l_border[0]);
+                point_angle[0]=points_r[i][0];
+                point_angle[1]=points_r[i][1];
+                point_fuzhu[0]=points_r[data_stastics_r-10][0];
+                point_fuzhu[1]=points_r[data_stastics_r-10][1];
+                line_to_border(point_fuzhu,point_angle,r_border[0]);
+                break;
+            }
+        
+        }
+    }
+        
+    break;
+    case 2:
+    for(int i=5;i<data_stastics_l;i++)
+    {
+        if(dir_l[i-2]==6  &(dir_l[i-1]==5 | dir_l[i]==5))
+        {
+            point_angle[0]=points_l[i][0];
+            point_angle[1]=points_l[i][1];
+            point_fuzhu[0]=points_l[2][0];
+            point_fuzhu[1]=points_l[2][1];
+            break;
+        }
+        
+    }
+    if(point_angle[0])
+    {
+        for(int i=0;i<point_angle[1]+15;i++)//阈值（因为十字前，两个直角几乎是同y
+        {
+            if(dir_r[i-2]==6  &(dir_r[i-1]==5 | dir_r[i]==5))
+            {
+                line_to_border(point_fuzhu,point_angle,l_border[0]);
+                point_angle[0]=points_r[i][0];
+                point_angle[1]=points_r[i][1];
+                point_fuzhu[0]=points_r[2][0];
+                point_fuzhu[1]=points_r[2][1];
+                line_to_border(point_fuzhu,point_angle,r_border[0]);
+                break;
+            }
+        
+        }
+    }
+    break;
+
+    case 3:
+    break;
+    
+    case 4:
+    for(int i=3;i<data_stastics_r;i++)
+    {
+            if(dir_r[i-1]==3  &(dir_r[i-3]==5 | dir_r[i-2]==5))
+            {
+                point_angle[0]=points_r[i-1][0];
+                point_angle[1]=points_r[i-1][1];
+                point_fuzhu[0]=2;
+                point_fuzhu[1]=10;
+                line_to_border(point_fuzhu,point_angle,r_border[0]);
+                break;
+            }
+        
+    }
+    for(int i=3;i<data_stastics_l;i++)
+    {
+            if(dir_l[i-1]==3  &(dir_l[i-3]==5 | dir_l[i-2]==5))
+            {
+                point_angle[0]=points_l[i-1][0];
+                point_angle[1]=points_l[i-1][1];
+                point_fuzhu[0]=77;
+                point_fuzhu[1]=10;
+                line_to_border(point_fuzhu,point_angle,r_border[0]);
+                break;
+            }
+        
+    }
+    break;
+
+    case 5:
+    for(int i=5;i<data_stastics_l;i++)
+    {
+        if(dir_l[i-2]==6  &(dir_l[i-1]==5 | dir_l[i]==5))
+        {
+            point_angle[0]=points_l[i][0];
+            point_angle[1]=points_l[i][1];
+            point_fuzhu[0]=points_l[2][0];
+            point_fuzhu[1]=points_l[2][1];
+            break;
+        }
+        
+    }
+    if(point_angle[0])
+    {
+        for(int i=0;i<data_stastics_r;i++)//阈值（因为十字前，两个直角几乎是同y
+        {
+            if(dir_r[i-2]==6  &(dir_r[i-1]==5 | dir_r[i]==5))
+            {
+                cout<<"jin";
+                line_to_border(point_fuzhu,point_angle,l_border[0]);
+                point_angle[0]=points_r[i][0];
+                point_angle[1]=points_r[i][1];
+                point_fuzhu[0]=points_r[2][0];
+                point_fuzhu[1]=points_r[2][1];
+                line_to_border(point_fuzhu,point_angle,r_border[0]);
+                break;
+            }
+        
+        }
+    }
+    break;
+
+    case 0:
+    break;    
+    
+    }
+
+ }
+
+
+
+
 #endif
 int main()
 {
-    cv::Mat color = cv::imread("saidao_pic/yuanhuan7.jpg");//读取图片（jpg）
+    cv::Mat color = cv::imread("saidao_pic/shizi7.jpg");//读取图片（jpg）
 
     uchar small_image[60][80] = {0};//数组图像初始化
 
@@ -1182,11 +1397,20 @@ int main()
         get_left(data_stastics_l);    // 6.提取左线
         get_right(data_stastics_r);   // 7.提取右线
         //元素处理
-        if(is_yuanhuan(&hightest,dir_r,dir_l,data_stastics_l,data_stastics_r,small_image))flag_yuanhuan=1;
+        if(flag_yuanhuan | flag_shizi);
+        else if(is_shizi(&hightest,dir_r,dir_l,data_stastics_l,data_stastics_r,small_image))flag_shizi=1;
+        else if(is_yuanhuan(&hightest,dir_r,dir_l,data_stastics_l,data_stastics_r,small_image))flag_yuanhuan=1;
         if(flag_yuanhuan)
         {
             yuanhuan_deal(hightest,dir_r,dir_l,data_stastics_l,data_stastics_r,small_image,points_r,points_l,&l_border,&r_border);
         }
+        else if(flag_shizi)
+        {
+            shizi_deal(hightest,dir_r,dir_l,data_stastics_l,data_stastics_r,small_image,points_r,points_l,&l_border,&r_border);
+        }
+
+        
+        
     }
 
 
